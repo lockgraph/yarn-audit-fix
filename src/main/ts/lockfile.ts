@@ -19,7 +19,11 @@ import { resolvePolicy } from './audit/policy'
 import { parsePackageRules } from './audit/filter'
 import { resolveScope } from './audit/scope'
 import { applyBatch, applyConstrained } from './audit/apply'
-import { gateByConsumers, gateByManifest } from './audit/gates'
+import {
+  gateByConsumers,
+  gateByManifest,
+  realignManifestDescriptors,
+} from './audit/gates'
 import { planUpgrades } from './audit/plan'
 import type { ApplyDeps } from './audit/apply'
 import { buildSummary, renderReport } from './audit/report'
@@ -229,6 +233,9 @@ export const _patch = async (
   graph = outcome.graph
   applied.push(...outcome.applied)
   completionDiagnostics.push(...outcome.diagnostics)
+  // `--force` just rewrote declared ranges in package.json; bring the lockfile's own
+  // descriptors along so yarn doesn't re-resolve and reject the result.
+  graph = realignManifestDescriptors(graph, manifestEdits)
 
   ctx.summary = buildSummary(!!flags['dry-run'], ledger, applied, report)
 
