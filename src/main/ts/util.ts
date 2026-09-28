@@ -96,3 +96,13 @@ const findClosest = (target: string, cwd = __dirname): string | null => {
 
   return found ? path.join(found, target) : null
 }
+
+/**
+ * Strip the userinfo out of any URL in a string. A registry URL legitimately carries
+ * basic-auth (`https://user:token@host`, via `--registry` / `YAF_REGISTRY`), and it
+ * reaches stdout by two routes: the runtime digest, and — less obviously — error text,
+ * where a failed request quotes the URL it tried. Apply this at every print of text
+ * yaf did not compose itself.
+ */
+export const maskUrlCreds = (text: string): string =>
+  text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, '$1***@')

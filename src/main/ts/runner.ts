@@ -8,7 +8,13 @@ import {
   resolveBins,
   verify,
 } from './stages'
-import { bold, getSelfManifest, normalizeFlags, readJson } from './util'
+import {
+  bold,
+  getSelfManifest,
+  maskUrlCreds,
+  normalizeFlags,
+  readJson,
+} from './util'
 
 /**
  * Collapse whatever was thrown into one readable line. Commands run with
@@ -37,7 +43,7 @@ const ERROR_PROBES: ((r: Record<string, any>) => string | undefined)[] = [
   (r) => (r.message ? String(r.message) : undefined),
 ]
 
-const formatError = (err: unknown): string => {
+const describeError = (err: unknown): string => {
   if (err instanceof Error) return err.message
   if (!err || typeof err !== 'object') return String(err)
   const r = err as Record<string, any>
@@ -47,6 +53,10 @@ const formatError = (err: unknown): string => {
   }
   return String(err)
 }
+
+/** Error text is not ours — a failed request quotes the URL it tried, credentials
+ *  and all — so mask before it reaches the console. */
+const formatError = (err: unknown): string => maskUrlCreds(describeError(err))
 
 /**
  * Build running context.
