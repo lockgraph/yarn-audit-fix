@@ -1,5 +1,5 @@
-<!DOCTYPE html><html class="default" lang="en" data-base="./"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>yarn-audit-fix - v11.0.3</title><meta name="description" content="Documentation for yarn-audit-fix"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="assets/style.css"/><link rel="stylesheet" href="assets/highlight.css"/><script defer src="assets/main.js"></script><script async src="assets/icons.js" id="tsd-icons-script"></script><script async src="assets/search.js" id="tsd-search-script"></script><script async src="assets/navigation.js" id="tsd-nav-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
-<div class="tsd-toolbar-contents container"><a href="index.html" class="title">yarn-audit-fix - v11.0.3</a>
+<!DOCTYPE html><html class="default" lang="en" data-base="./"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>yarn-audit-fix - v11.0.4</title><meta name="description" content="Documentation for yarn-audit-fix"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="assets/style.css"/><link rel="stylesheet" href="assets/highlight.css"/><script defer src="assets/main.js"></script><script async src="assets/icons.js" id="tsd-icons-script"></script><script async src="assets/search.js" id="tsd-search-script"></script><script async src="assets/navigation.js" id="tsd-nav-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="index.html" class="title">yarn-audit-fix - v11.0.4</a>
 <div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
 <ul role="listbox" id="tsd-search-results"></ul>
 <div id="tsd-search-status" aria-live="polite" aria-atomic="true">
@@ -7,7 +7,7 @@
 <div class="container container-main">
 <div class="col-content">
 <div class="tsd-page-title">
-<h1>yarn-audit-fix - v11.0.3</h1></div>
+<h1>yarn-audit-fix - v11.0.4</h1></div>
 <div class="tsd-panel tsd-typography"><p align="center">
   <a href="https://yarnpkg.com/">
     <img alt="Yarn audit fix" src="https://github.com/lockgraph/yarn-audit-fix/blob/master/img/yarn-audit-fix.png?raw=true" width="546">
@@ -145,7 +145,10 @@ Upgraded deps (1):
 </pre>
 <p>The lockfile is patched <strong>in place</strong> — the fix versions, their new transitive
 dependencies, and (for yarn berry) the package checksums are all resolved
-straight from the registry, so there's no reconcile <code>yarn install</code> step.</p>
+straight from the registry, so there's no reconcile <code>yarn install</code> step. A
+checksum yaf can't prove (say, a package with no fetchable tarball) is left out
+rather than guessed, and the run names it and why; a plain <code>yarn install</code> fills
+it in without changing any resolution.</p>
 <table>
 <thead>
 <tr>
@@ -184,11 +187,6 @@ straight from the registry, so there's no reconcile <code>yarn install</code> st
 <td><code>--help/-h</code></td>
 <td>Print help message</td>
 <td></td>
-</tr>
-<tr>
-<td><code>--npm-path</code></td>
-<td>Switch to project's local <strong>npm</strong> version instead of system default. Or provide a custom path. <code>system / local / &lt;custom path&gt;</code></td>
-<td><code>system</code></td>
 </tr>
 <tr>
 <td><code>--registry</code></td>
@@ -286,8 +284,9 @@ the newer dependency:</p>
 </code><button>Copy</button></pre>
 
 <blockquote>
-<p>Constraints gate a fix's dependency <strong>closure</strong> (the transitives it pulls in),
-not the fixed package's own <code>engines</code>/<code>license</code>.</p>
+<p>Constraints gate both the version a fix lands on and the dependency <strong>closure</strong>
+it pulls in. A fix whose own version fails the policy is skipped and reported
+as <em>the fix version itself is not permitted</em>.</p>
 </blockquote>
 <p><strong><code>--safe</code></strong> rolls the automatable gates into one flag — the opposite of <code>--force</code>.
 It's shorthand for <code>--engines.node=floor</code> (don't raise the engine floor your tree
@@ -359,13 +358,13 @@ Typedoc: <a href="https://antongolub.github.io/yarn-audit-fix/modules/">antongol
 <pre><code class="ts"><span class="hl-8">import</span><span class="hl-1"> { </span><span class="hl-4">run</span><span class="hl-1"> } </span><span class="hl-8">from</span><span class="hl-1"> </span><span class="hl-2">&#39;yarn-audit-fix&#39;</span><br/><br/><span class="hl-10">// async since v11 — advisories are fetched from the registry over HTTP</span><br/><span class="hl-8">await</span><span class="hl-1"> </span><span class="hl-0">run</span><span class="hl-1">({</span><br/><span class="hl-1">   </span><span class="hl-4">verbose:</span><span class="hl-1"> </span><span class="hl-3">true</span><br/><span class="hl-1">})</span>
 </code><button type="button">Copy</button></pre>
 
-<p>Individual stages (<code>resolveBins</code>, <code>patchLockfile</code>, <code>yarnInstall</code>, …) are exported too, so you can compose your own pipeline if needed.</p>
+<p>Individual stages (<code>resolveBins</code>, <code>patchLockfile</code>, <code>verify</code>, …) are exported too, so you can compose your own pipeline if needed.</p>
 <h2 id="migration-notes" class="tsd-anchor-link">Migration notes<a href="#migration-notes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
 <h3 id="1100" class="tsd-anchor-link">^11.0.0<a href="#1100" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <p><strong>BREAKING:</strong> the legacy <code>convert</code> flow is removed, and so is the <code>--flow</code> switch (plus its <code>synp</code>-based two-way lockfile conversion and the now-dead <code>--package-lock-only</code> / <code>--legacy-peer-deps</code> / <code>--loglevel</code> / <code>--only</code> flags). Direct graph patching is the only flow now — it is more controllable and supports every yarn schema.</p>
 <p>With a single flow, the flow abstraction itself is gone: <code>getFlow</code>, the <code>TFlow</code> / <code>TStage</code> types, and the optional custom-flow argument to <code>run</code> are removed. Call <code>run(flags)</code> — the patch pipeline is inlined. The individual stages are still exported if you want to assemble your own.</p>
 <p>Adds first-class Yarn 4+ support (<a href="https://github.com/lockgraph/yarn-audit-fix/issues/248">#248</a>). The bespoke v1/v2 lockfile adapters are replaced with <a href="https://github.com/lockgraph/lockgraph"><code>lockgraph</code></a>, which auto-detects every yarn schema (classic + berry v4–v10). The audit parser handles both the yarn 2/3 <code>{advisories: …}</code> shape and yarn 4's NDJSON, deriving <code>patched_versions</code> from <code>Vulnerable Versions</code> when the field is absent. Each vulnerable package is upgraded graph-natively to the lowest published version that clears its advisory, and the fix version's <strong>new transitive dependencies are pulled into the lockfile</strong> (resolved from the registry) — so an upgrade that changes a package's dependency set no longer leaves the lockfile incomplete.</p>
-<p><strong>BREAKING:</strong> <code>yarn-audit-fix</code> no longer runs a reconcile <code>yarn install</code>. The lockfile is patched and completed entirely in place — fix versions, their new transitive closure, and (for yarn berry) the recomputed package checksums all come straight from the registry. yaf no longer shells out to yarn, and a <code>node_modules</code> directory is no longer required to run it.</p>
+<p><strong>BREAKING:</strong> <code>yarn-audit-fix</code> no longer runs a reconcile <code>yarn install</code>. The lockfile is patched and completed entirely in place — fix versions, their new transitive closure, and (for yarn berry) the recomputed package checksums all come straight from the registry. A checksum yaf can't prove is left out and reported rather than guessed; a plain <code>yarn install</code> fills it in. yaf no longer shells out to yarn, and a <code>node_modules</code> directory is no longer required to run it.</p>
 <p><strong>BREAKING:</strong> advisories are now fetched <strong>straight from the registry</strong> (the npm bulk advisory endpoint) instead of spawning <code>yarn audit</code> / <code>npm audit</code>. This fixes audit against custom/in-house registries (<a href="https://github.com/yarnpkg/yarn/issues/7012">yarn#7012</a>) and is faster (the lockfile graph is already parsed). The registry, per-scope registries and auth are inherited from <code>.npmrc</code> / <code>.yarnrc.yml</code> / <code>.yarnrc</code> (project then global) + env, or overridden with <code>--registry</code>. Auth tokens are bound to the host that declared them and only sent over HTTPS.</p>
 <p><strong>BREAKING:</strong> because the fetch is over HTTP, the run is now async — <strong><code>runSync</code> is removed</strong>. Use <code>await run(flags)</code> (the CLI is unchanged). The exported stages are still available if you assemble your own pipeline.</p>
 <p><strong>Lockfile fidelity:</strong> checksums, integrity, <code>conditions</code> / <code>dependenciesMeta</code> /
@@ -373,7 +372,7 @@ Typedoc: <a href="https://antongolub.github.io/yarn-audit-fix/modules/">antongol
 preserved — real-world locks round-trip unchanged, so a fix produces no spurious churn.</p>
 <p><strong>Slimmer footprint:</strong> <code>jest</code>→<code>vitest</code>; dropped <code>lodash-es</code> / <code>fs-extra</code> / <code>chalk</code> /
 <code>js-yaml</code>; <code>commander</code>→<code>minimist</code>.</p>
-<p><strong>Node floor / <code>engines</code>:</strong> v11 no longer declares <code>engines.node</code>, so installing yarn-audit-fix never warns <code>EBADENGINE</code> on its own behalf. The effective runtime floor is <strong>Node ≥ 14.18</strong>, inherited from <a href="https://github.com/lockgraph/lockgraph"><code>lockgraph</code></a>. The CLI argument parser also moved off <code>commander</code> (which had been ratcheting its own Node floor up) to a tiny <code>minimist</code>-based parser — flags, env vars and <code>--help</code> are unchanged.</p>
+<p><strong>Node floor / <code>engines</code>:</strong> v11 no longer declares <code>engines.node</code>, so installing yarn-audit-fix never warns <code>EBADENGINE</code> on its own behalf. The effective runtime floor is <strong>Node ≥ 18.12</strong>, set by Yarn's zip layer (<code>@yarnpkg/libzip</code> / <code>@yarnpkg/fslib</code>) that recomputes berry checksums; <a href="https://github.com/lockgraph/lockgraph"><code>lockgraph</code></a> itself runs on ≥ 14.18. The CLI argument parser also moved off <code>commander</code> (which had been ratcheting its own Node floor up) to a tiny <code>minimist</code>-based parser — flags, env vars and <code>--help</code> are unchanged.</p>
 <p><strong>CLI flags:</strong> both <code>--exclude</code> and <code>--ignore</code> are applied client-side now (they used to be forwarded to <code>yarn npm audit</code>). <code>--exclude</code> takes comma-separated <strong>package</strong> rules — <code>glob[@range]</code>, e.g. <code>--exclude=&quot;lodash,@scope/*@&gt;=2 &lt;3&quot;</code> — and skips updating any package whose name matches the glob (and, if a range is given, whose installed version satisfies it); handy for a manually pinned transitive you don't want bumped. <code>--ignore</code> keeps its advisory scope but now matches <strong>advisory ids</strong> — comma-separated globs against the GHSA id or the npm advisory id (e.g. <code>--ignore=&quot;GHSA-*&quot;</code>), dropping matching advisories before the fix. (The npm bulk-advisory endpoint doesn't expose CVE numbers, so — like zx's audit script — matching is by GHSA / npm id.) The standalone <code>--ignore-engines</code> flag is removed — there is no longer a reconcile <code>yarn install</code> for it to apply to.</p>
 <h3 id="1000" class="tsd-anchor-link">^10.0.0<a href="#1000" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <p>v10 bumps the pkg deps and requires NodeJS v14.</p>
@@ -420,7 +419,7 @@ preserved — real-world locks round-trip unchanged, so a fix produces no spurio
 
 <p>Not everything can be repaired.</p>
 <h3 id="cannot-install-package-despite-being-on-correct-node-version" class="tsd-anchor-link">Cannot install package despite being on correct node version<a href="#cannot-install-package-despite-being-on-correct-node-version" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
-<p>yarn-audit-fix is compatible with any NodeJS version which supports ESM, but nested packages can declare their own engine requirements.</p>
+<p>yarn-audit-fix needs Node ≥ 18.12 (see <a href="#requirements">Requirements</a>), but nested packages can declare their own engine requirements.</p>
 <pre><code class="shell"><span class="hl-0">node-releases@2.0.48:</span><span class="hl-1"> </span><span class="hl-2">The</span><span class="hl-1"> </span><span class="hl-2">engine</span><span class="hl-1"> </span><span class="hl-2">&quot;node&quot;</span><span class="hl-1"> </span><span class="hl-2">is</span><span class="hl-1"> </span><span class="hl-2">incompatible</span><span class="hl-1"> </span><span class="hl-2">with</span><span class="hl-1"> </span><span class="hl-2">this</span><span class="hl-1"> </span><span class="hl-2">module.</span><span class="hl-1"> </span><span class="hl-2">Expected</span><span class="hl-1"> </span><span class="hl-2">version</span><span class="hl-1"> </span><span class="hl-2">&quot;&gt;=18&quot;.</span><span class="hl-1"> </span><span class="hl-2">Got</span><span class="hl-1"> </span><span class="hl-2">&quot;16.20.1&quot;</span>
 </code><button type="button">Copy</button></pre>
 
@@ -488,7 +487,7 @@ Any feedback is appreciated.</p>
 <li><a href="#cannot-install-package-despite-being-on-correct-node-version"><span>Cannot install package despite being on correct node version</span></a></li>
 <li><a href="#audit-used-to-fail-with-a-4xx-on-an-odd-transitive"><span>Audit used to fail with a 4xx on an odd transitive</span></a></li></ul><a href="#contributing"><span>Contributing</span></a><a href="#license"><span>License</span></a></div></details></div>
 <div class="site-menu">
-<nav class="tsd-navigation"><a href="modules.html">yarn-audit-fix - v11.0.3</a>
+<nav class="tsd-navigation"><a href="modules.html">yarn-audit-fix - v11.0.4</a>
 <ul class="tsd-small-nested-navigation" id="tsd-nav-container">
 <li>Loading...</li></ul></nav></div></div></div><footer></footer>
 <div class="overlay"></div></body></html>
