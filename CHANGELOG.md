@@ -1,3 +1,8 @@
+## [11.0.5](https://github.com/lockgraph/yarn-audit-fix/compare/v11.0.4...v11.0.5) (2026-09-28)
+
+### Fixes & improvements
+* fix: update lockgraph to 0.8.1 to fix bin map issues (#402) ([53ad172](https://github.com/lockgraph/yarn-audit-fix/commit/53ad1728b119f7615277ad074a8bec1aefd8aaea))
+
 ## [11.0.4](https://github.com/lockgraph/yarn-audit-fix/compare/v11.0.3...v11.0.4) (2026-09-03)
 
 ### Fixes & improvements
