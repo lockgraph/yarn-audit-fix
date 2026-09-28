@@ -2371,9 +2371,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lockgraph@npm:^0.8.0":
-  version: 0.8.0
-  resolution: "lockgraph@npm:0.8.0"
+"lockgraph@npm:^0.8.1":
+  version: 0.8.1
+  resolution: "lockgraph@npm:0.8.1"
   dependencies:
     node-fetch-native: "npm:^1.6.7"
     pako: "npm:^3.0.1"
@@ -2383,7 +2383,7 @@ __metadata:
   peerDependenciesMeta:
     "@yarnpkg/libzip":
       optional: true
-  checksum: 10c0/bf9580466853d51190775a4d80d02eedbb04a445468b71f47761ec0c0703b576073a643609ac14ad1334e81a18149592389e95ffea5a8602d9b90c8c662f1311
+  checksum: 10c0/9c5fc179ee9a512453c554fa03d90396c7550d0dd2b16a93f340b00f1e6533d0c781d58da49af5aa7e36a6be7e1aaeac5551bd51fd680c75adf86b69d0f4726f
   languageName: node
   linkType: hard
 
@@ -3767,7 +3767,7 @@ __metadata:
     esbuild: "npm:^0.28.2"
     esbuild-node-externals: "npm:^2.0.0"
     fast-glob: "npm:^3.3.3"
-    lockgraph: "npm:^0.8.0"
+    lockgraph: "npm:^0.8.1"
     minimist: "npm:^1.2.8"
     mkdirp: "npm:^3.0.1"
     oxlint: "npm:^1.80.0"

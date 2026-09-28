@@ -909,7 +909,7 @@ __metadata:
     )
   })
 
-  it('defers bare-era (yarn-3 / berry-v6) checksums — never fills or fetches', async () => {
+  it('defers bare-era (yarn-3 / berry-v6) checksums it cannot prove — never corrupts them', async () => {
     const v3 = path.resolve(__dirname, '../fixtures/lockfile/v3/yarn.lock')
     const input = readFileSync(v3, 'utf-8')
     // strip the checksum to mimic a freshly-added node refurbish would fill
@@ -918,20 +918,14 @@ __metadata:
     const fmt = getLockfileType(stripped)
     expect(fmt).toBe('yarn-berry-v6')
 
-    let fetched = 0
-    const source = {
-      tarball: async () => {
-        fetched += 1
-        return undefined
-      },
-    }
+    const source = { tarball: async () => undefined }
     const out = format(await refurbish(parse(stripped, fmt), fmt, rctx(source)), fmt)
 
-    // yarn 2.x/3.x checksums are bare (no cacheKey prefix) + DEFLATE, not
-    // reproducible from the npm tarball — so refurbish must defer (never fetch,
-    // never fill) and let `yarn install` self-heal. Guards the snapshot.73
-    // "fill with 10c0/<hex> STORE form" lock-corruption regression.
-    expect(fetched).toBe(0)
+    // yarn 2.x/3.x checksums are bare (no cacheKey prefix); the key lives in the
+    // `__metadata.cacheKey` header. With no tarball bytes to rebuild the archive
+    // from, refurbish must defer — leave the line out and let `yarn install`
+    // self-heal — never fill a guess. Guards the snapshot.73 "fill with
+    // 10c0/<hex> STORE form" lock-corruption regression.
     expect(out).not.toMatch(/10c0\//)
     expect(out).toBe(stripped)
   })

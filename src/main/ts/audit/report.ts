@@ -24,6 +24,24 @@ const reportDiagnostics = (
     warn(`  … ${diagnostics.length - 5} more (--verbose to list)`)
 }
 
+/**
+ * ` (tarball-unavailable: 2, cache-key-unknown: 1)` — why refurbish deferred these
+ * checksums, from lockgraph's `data.reason` (≥ 0.8.1). Empty when no reason is
+ * carried, so an older lib keeps the plain message.
+ */
+export const deferredReasons = (
+  diagnostics: readonly { data?: unknown }[],
+): string => {
+  const counts = new Map<string, number>()
+  for (const d of diagnostics) {
+    const reason = (d.data as { reason?: unknown } | undefined)?.reason
+    if (typeof reason === 'string')
+      counts.set(reason, (counts.get(reason) ?? 0) + 1)
+  }
+  if (counts.size === 0) return ''
+  return ` (${[...counts].map(([reason, n]) => `${reason}: ${n}`).join(', ')})`
+}
+
 /** One vulnerable package, its minimal fix, and the nodes to rebind. */
 export type Plan = {
   name: string

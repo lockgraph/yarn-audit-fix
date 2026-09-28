@@ -26,7 +26,7 @@ import {
 } from './audit/gates'
 import { planUpgrades } from './audit/plan'
 import type { ApplyDeps } from './audit/apply'
-import { buildSummary, renderReport } from './audit/report'
+import { buildSummary, deferredReasons, renderReport } from './audit/report'
 import type { ConstraintSkip, Ledger, Plan } from './audit/report'
 import { auditViaRegistry } from './audit/registry'
 import {
@@ -76,11 +76,20 @@ export const _format = (
     return lfStringify(lockfile as Graph, lockfileType as FormatId)
   } catch (e) {
     // The one loss yaf accepts: `ENRICH_REQUIRED` means every loss is *recoverable*
-    // — a berry-zip `checksum` `refurbish` couldn't fill (no fetchable tarball, or a
-    // bare-era yarn 2/3 lock). That's yaf's documented deferred-checksum model: emit
+    // — a berry-zip `checksum` `refurbish` couldn't fill or prove (see its
+    // `data.reason`). That's yaf's documented deferred-checksum model: emit
     // the lock and let the user finish with `yarn install` (`refurbish` already
     // reported it). Any other error (e.g. `IRREDUCIBLE_LOSS`) still fails closed.
-    if (e instanceof LockfileError && e.code === 'ENRICH_REQUIRED')
+    //
+    // The retry is `strict: false`, which silences EVERY loss — so check the list,
+    // not the code alone. A meaningful loss riding along on an `ENRICH_REQUIRED`
+    // would otherwise be emitted silently, which is how a real projection defect
+    // can hide behind a deferred checksum.
+    if (
+      e instanceof LockfileError &&
+      e.code === 'ENRICH_REQUIRED' &&
+      !(e.losses ?? []).some((l) => l.class === 'inherent-meaningful')
+    )
       return lfStringify(lockfile as Graph, lockfileType as FormatId, {
         strict: false,
       })
@@ -309,15 +318,16 @@ export const _refurbish = async (
   if (!ctx.flags.silent) {
     const warn = ctx.progress ? ctx.progress.log : console.warn
     // `unresolved` carries *every* diagnostic, including successful fills — so
-    // surface only genuine gaps: a node whose checksum couldn't be recomputed
-    // (git / private / workspace deps with no fetchable tarball). Those still
-    // need a real `yarn install` to finish the lockfile.
+    // surface only genuine gaps: a node whose checksum couldn't be recomputed or
+    // proven (no tarball bytes, an unknown cacheKey, a recipe that doesn't
+    // reproduce — lockgraph names it in `data.reason`). Those still need a real
+    // `yarn install` to finish the lockfile.
     const deferred = result.unresolved.filter(
       (d) => d.code === 'ENRICH_CHECKSUM_DEFERRED',
     )
     if (deferred.length > 0) {
       warn(
-        `Could not compute checksums for ${deferred.length} package(s) with no fetchable tarball — run \`yarn install\` to finish the lockfile:`,
+        `Could not compute checksums for ${deferred.length} package(s)${deferredReasons(deferred)} — run \`yarn install\` to finish the lockfile:`,
       )
       reportDiagnostics(deferred, ctx.flags.verbose, warn)
     }
