@@ -96,7 +96,11 @@ Upgraded deps (1):
 
 The lockfile is patched **in place** — the fix versions, their new transitive
 dependencies, and (for yarn berry) the package checksums are all resolved
-straight from the registry, so there's no reconcile `yarn install` step.
+straight from the registry, so there's no reconcile `yarn install` step. A
+checksum yaf can't prove (say, a package with no fetchable tarball) is left out
+rather than guessed, and the run names it and why; a plain `yarn install` fills
+it in without changing any resolution.
+
 | Option                | Description                                                                                                                                                             | Default                                    |
 |-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|
 | `--audit-level`       | Include a vulnerability with a level as defined or higher. Supported values: low, moderate, high, critical                                                              | all                                      |
@@ -105,7 +109,6 @@ straight from the registry, so there's no reconcile `yarn install` step.
 | `--json`              | Print the outcome as JSON — `{ dryRun, upgraded, skipped, excluded, noFix }` — instead of the human summary; pairs with `--dry-run` for a machine-readable preview.       | `false`                                    |
 | `--force`             | Apply cross-major fixes: bump past a consumer's declared range, and rewrite a direct-dep range in `package.json` (root or a workspace) that the fix falls outside. See [Direct-dependency pins](#direct-dependency-pins) | `false`             |
 | `--help/-h`           | Print help message                                                                                                                                                      |                                            |
-| `--npm-path`          | Switch to project's local **npm** version instead of system default. Or provide a custom path. `system / local / <custom path>`                                         | `system`                                   |
 | `--registry`          | Custom registry url                                                                                                                                                     |                                            |
 | `--silent`            | Disable log output                                                                                                                                                      | `false`                                    |
 | `--verbose`           | Switch log level to verbose/debug                                                                                                                                       | `false`                                    |
@@ -157,8 +160,9 @@ Skipped (constraints — no fix keeps the closure within the policy [node >=18];
   lodash@4.17.11 → 4.18.0 — needs some-dep@^2.0.0
 ```
 
-> Constraints gate a fix's dependency **closure** (the transitives it pulls in),
-> not the fixed package's own `engines`/`license`.
+> Constraints gate both the version a fix lands on and the dependency **closure**
+> it pulls in. A fix whose own version fails the policy is skipped and reported
+> as *the fix version itself is not permitted*.
 
 **`--safe`** rolls the automatable gates into one flag — the opposite of `--force`.
 It's shorthand for `--engines.node=floor` (don't raise the engine floor your tree
@@ -255,7 +259,7 @@ await run({
 })
 ```
 
-Individual stages (`resolveBins`, `patchLockfile`, `yarnInstall`, …) are exported too, so you can compose your own pipeline if needed.
+Individual stages (`resolveBins`, `patchLockfile`, `verify`, …) are exported too, so you can compose your own pipeline if needed.
 
 ## Migration notes
 ### ^11.0.0
@@ -265,7 +269,7 @@ With a single flow, the flow abstraction itself is gone: `getFlow`, the `TFlow` 
 
 Adds first-class Yarn 4+ support ([#248](https://github.com/lockgraph/yarn-audit-fix/issues/248)). The bespoke v1/v2 lockfile adapters are replaced with [`lockgraph`](https://github.com/lockgraph/lockgraph), which auto-detects every yarn schema (classic + berry v4–v10). The audit parser handles both the yarn 2/3 `{advisories: …}` shape and yarn 4's NDJSON, deriving `patched_versions` from `Vulnerable Versions` when the field is absent. Each vulnerable package is upgraded graph-natively to the lowest published version that clears its advisory, and the fix version's **new transitive dependencies are pulled into the lockfile** (resolved from the registry) — so an upgrade that changes a package's dependency set no longer leaves the lockfile incomplete.
 
-**BREAKING:** `yarn-audit-fix` no longer runs a reconcile `yarn install`. The lockfile is patched and completed entirely in place — fix versions, their new transitive closure, and (for yarn berry) the recomputed package checksums all come straight from the registry. yaf no longer shells out to yarn, and a `node_modules` directory is no longer required to run it.
+**BREAKING:** `yarn-audit-fix` no longer runs a reconcile `yarn install`. The lockfile is patched and completed entirely in place — fix versions, their new transitive closure, and (for yarn berry) the recomputed package checksums all come straight from the registry. A checksum yaf can't prove is left out and reported rather than guessed; a plain `yarn install` fills it in. yaf no longer shells out to yarn, and a `node_modules` directory is no longer required to run it.
 
 **BREAKING:** advisories are now fetched **straight from the registry** (the npm bulk advisory endpoint) instead of spawning `yarn audit` / `npm audit`. This fixes audit against custom/in-house registries ([yarn#7012](https://github.com/yarnpkg/yarn/issues/7012)) and is faster (the lockfile graph is already parsed). The registry, per-scope registries and auth are inherited from `.npmrc` / `.yarnrc.yml` / `.yarnrc` (project then global) + env, or overridden with `--registry`. Auth tokens are bound to the host that declared them and only sent over HTTPS.
 
@@ -278,7 +282,7 @@ preserved — real-world locks round-trip unchanged, so a fix produces no spurio
 **Slimmer footprint:** `jest`→`vitest`; dropped `lodash-es` / `fs-extra` / `chalk` /
 `js-yaml`; `commander`→`minimist`.
 
-**Node floor / `engines`:** v11 no longer declares `engines.node`, so installing yarn-audit-fix never warns `EBADENGINE` on its own behalf. The effective runtime floor is **Node ≥ 14.18**, inherited from [`lockgraph`](https://github.com/lockgraph/lockgraph). The CLI argument parser also moved off `commander` (which had been ratcheting its own Node floor up) to a tiny `minimist`-based parser — flags, env vars and `--help` are unchanged.
+**Node floor / `engines`:** v11 no longer declares `engines.node`, so installing yarn-audit-fix never warns `EBADENGINE` on its own behalf. The effective runtime floor is **Node ≥ 18.12**, set by Yarn's zip layer (`@yarnpkg/libzip` / `@yarnpkg/fslib`) that recomputes berry checksums; [`lockgraph`](https://github.com/lockgraph/lockgraph) itself runs on ≥ 14.18. The CLI argument parser also moved off `commander` (which had been ratcheting its own Node floor up) to a tiny `minimist`-based parser — flags, env vars and `--help` are unchanged.
 
 **CLI flags:** both `--exclude` and `--ignore` are applied client-side now (they used to be forwarded to `yarn npm audit`). `--exclude` takes comma-separated **package** rules — `glob[@range]`, e.g. `--exclude="lodash,@scope/*@>=2 <3"` — and skips updating any package whose name matches the glob (and, if a range is given, whose installed version satisfies it); handy for a manually pinned transitive you don't want bumped. `--ignore` keeps its advisory scope but now matches **advisory ids** — comma-separated globs against the GHSA id or the npm advisory id (e.g. `--ignore="GHSA-*"`), dropping matching advisories before the fix. (The npm bulk-advisory endpoint doesn't expose CVE numbers, so — like zx's audit script — matching is by GHSA / npm id.) The standalone `--ignore-engines` flag is removed — there is no longer a reconcile `yarn install` for it to apply to.
 
@@ -336,7 +340,7 @@ Done
 Not everything can be repaired.
 
 ### Cannot install package despite being on correct node version
-yarn-audit-fix is compatible with any NodeJS version which supports ESM, but nested packages can declare their own engine requirements.
+yarn-audit-fix needs Node ≥ 18.12 (see [Requirements](#requirements)), but nested packages can declare their own engine requirements.
 ```shell
 node-releases@2.0.48: The engine "node" is incompatible with this module. Expected version ">=18". Got "16.20.1"
 ```

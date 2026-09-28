@@ -6,7 +6,7 @@ import minimist from 'minimist'
 
 import { TFlags } from './ifaces'
 import { run } from './runner'
-import { getSelfManifest } from './util'
+import { getSelfManifest, maskUrlCreds } from './util'
 
 // Declarative option spec (keeps `parse` small and the Node floor low — see the
 // v11 migration note): value-taking vs boolean flags, their `YAF_*` env-var
@@ -197,7 +197,7 @@ void (async () => {
     // `parse` throws on invalid CLI input; `run` already printed its own report
     // and set process.exitCode — surface only a parse message, then ensure 1.
     if (process.exitCode === undefined && err instanceof Error)
-      console.error(err.message)
+      console.error(maskUrlCreds(err.message))
     process.exitCode ||= 1
   }
 })()

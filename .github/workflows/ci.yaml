@@ -34,6 +34,11 @@ jobs:
 
       - run: corepack yarn build
 
+      # Docs are out of the `build:*` glob on purpose: only this job feeds the
+      # release artifact, and the Windows PR cells would pay a typedoc install for
+      # output nobody reads.
+      - run: corepack yarn docs
+
       - run: corepack yarn test
 
       # This phase runs untrusted deps + code (install, full suite), so it holds
@@ -63,6 +68,7 @@ jobs:
   pr:
     if: github.event_name == 'pull_request'
     name: PR (Node ${{ matrix.node-version }}, ${{ matrix.os }})
+    needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
@@ -92,7 +98,12 @@ jobs:
       # shadows the corepack shim on PATH. Going through corepack needs no shims.
       - run: corepack yarn install --immutable
 
-      - run: corepack yarn build
+      # Built once in `build`; every cell restores that artifact instead of
+      # rebuilding, so the matrix measures the shipped bundle rather than N
+      # rebuilds of it.
+      - uses: actions/download-artifact@v8
+        with:
+          name: build
 
       - run: corepack yarn test:integration
 
@@ -166,7 +177,7 @@ jobs:
           # ggcp exits 0 even when it matches nothing, so assert the input exists
           # rather than trust the exit code.
           test -f target/docs/index.html
-          npm_config_yes=true npx ggcp@1.11.0 'target/docs>**/*' \
+          npx --yes ggcp@1.11.0 'target/docs>**/*' \
             "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git/gh-pages" \
             --message='docs: update api reference'
 
@@ -181,7 +192,7 @@ jobs:
           node-version: '18.12' # highest engines.node floor in the shipped closure (@yarnpkg/libzip)
 
       - name: Check running via npx
-        run: npm_config_yes=true npx yarn-audit-fix@latest --version
+        run: npx --yes yarn-audit-fix@latest --version
 
       # Installs from the registry on purpose: this checks the published artifact,
       # not the local tree.

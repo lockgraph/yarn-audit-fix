@@ -3,7 +3,7 @@ import sv from 'semver'
 import type { Graph } from 'lockgraph'
 
 import type { Ledger, Plan } from './report'
-import type { TContext } from '../ifaces'
+import type { TContext, TManifestEdit } from '../ifaces'
 import { normalizeRange } from './plan'
 
 /** Widen a declared range to admit `fix`, preserving the pin operator
@@ -85,6 +85,59 @@ export const gateByManifest = (
     gatedPlans.push(p)
   }
   return gatedPlans
+}
+
+/**
+ * `--force` rewrites the declared range in package.json, but the lockfile still keys the
+ * entry — and the workspace's own edge — by the OLD descriptor. yarn then re-resolves
+ * from the manifest, finds no entry for the new range and rejects the lock under
+ * `--immutable` (YN0028). Re-point those edges at the rewritten range so the two agree.
+ *
+ * Only edges out of a workspace node carry a declared range; a rootless yarn-classic
+ * lock has none, so this no-ops there.
+ */
+export const realignManifestDescriptors = (
+  graph: Graph,
+  edits: readonly TManifestEdit[],
+): Graph => {
+  if (edits.length === 0) return graph
+  const wanted = new Map(edits.map((e) => [e.name, e]))
+  let next = graph
+  for (const node of graph.nodes()) {
+    if (node.workspacePath === undefined) continue
+    for (const edge of graph.out(node.id)) {
+      const target = graph.getNode(edge.target)
+      const range = rewrittenRange(
+        edge.attributes?.range,
+        target && wanted.get(target.name),
+      )
+      if (range === undefined) continue
+      next = next.mutate((m) => {
+        m.removeEdge(edge.source, edge.target, edge.kind)
+        m.addEdge(edge.source, edge.target, edge.kind, {
+          ...edge.attributes,
+          range,
+        })
+      }).graph
+    }
+  }
+  return next
+}
+
+/**
+ * The range this edge should carry after a `--force` manifest rewrite, or `undefined`
+ * when it isn't the declaration that was rewritten. Yarn's `npm:` protocol is optional
+ * on the edge, so whichever form it used is preserved.
+ */
+const rewrittenRange = (
+  raw: unknown,
+  edit: TManifestEdit | undefined,
+): string | undefined => {
+  if (!edit || typeof raw !== 'string') return undefined
+  const proto = raw.startsWith('npm:') ? 'npm:' : ''
+  return raw.slice(proto.length) === edit.from
+    ? `${proto}${edit.to}`
+    : undefined
 }
 
 /**

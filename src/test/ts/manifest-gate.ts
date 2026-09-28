@@ -52,19 +52,37 @@ const lock = (key: string): string =>
   '  integrity sha512-cQKh8igo5QUhZ7lg38DYWAxMvjSAKG0A8wGSVimP07SIUEK2UO+arSRKbRZWtelMtN5V0Hkwh5ryOto/SshYIg==\n'
 
 // A throwaway project dir with package.json + yarn.lock; returns cwd + the yaf ctx.
-const project = (pkgRange: string, lockKey: string, flags: Record<string, any>) => {
+const project = (
+  pkgRange: string,
+  lockKey: string,
+  flags: Record<string, any>,
+) => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yaf-mg-'))
-  const manifest = { name: 'proj', private: true, dependencies: { lodash: pkgRange } }
-  fs.writeFileSync(path.join(cwd, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
+  const manifest = {
+    name: 'proj',
+    private: true,
+    dependencies: { lodash: pkgRange },
+  }
+  fs.writeFileSync(
+    path.join(cwd, 'package.json'),
+    JSON.stringify(manifest, null, 2) + '\n',
+  )
   fs.writeFileSync(path.join(cwd, 'yarn.lock'), lock(lockKey))
-  const context: any = { cwd, flags: { silent: true, ...flags }, manifest, registry }
+  const context: any = {
+    cwd,
+    flags: { silent: true, ...flags },
+    manifest,
+    registry,
+  }
   context.ctx = context // TContext self-reference (patchLockfile destructures { ctx })
   return { cwd, context }
 }
 
 const pkgRange = (cwd: string): string =>
-  JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf-8')).dependencies.lodash
-const readLock = (cwd: string): string => fs.readFileSync(path.join(cwd, 'yarn.lock'), 'utf-8')
+  JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf-8'))
+    .dependencies.lodash
+const readLock = (cwd: string): string =>
+  fs.readFileSync(path.join(cwd, 'yarn.lock'), 'utf-8')
 
 describe('manifest gate — integration (patchLockfile on a real project dir)', () => {
   afterEach(() => {
@@ -81,7 +99,9 @@ describe('manifest gate — integration (patchLockfile on a real project dir)', 
 
   it('--force: rewrites the package.json range + bumps the lock in place', async () => {
     audit.mockResolvedValue(report)
-    const { cwd, context } = project('4.17.11', 'lodash@4.17.11', { force: true })
+    const { cwd, context } = project('4.17.11', 'lodash@4.17.11', {
+      force: true,
+    })
     await patchLockfile(context)
     expect(pkgRange(cwd)).toBe('4.18.0') // rewritten (exact style preserved)
     const l = readLock(cwd)
@@ -91,7 +111,10 @@ describe('manifest gate — integration (patchLockfile on a real project dir)', 
 
   it('--dry-run --force: computes the edit but writes NOTHING', async () => {
     audit.mockResolvedValue(report)
-    const { cwd, context } = project('4.17.11', 'lodash@4.17.11', { force: true, 'dry-run': true })
+    const { cwd, context } = project('4.17.11', 'lodash@4.17.11', {
+      force: true,
+      'dry-run': true,
+    })
     await patchLockfile(context)
     expect(pkgRange(cwd)).toBe('4.17.11') // untouched (dry-run)
     expect(readLock(cwd)).toContain('version "4.17.11"') // untouched
@@ -117,8 +140,15 @@ describe('manifest gate — integration (patchLockfile on a real project dir)', 
       },
     })
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yaf-mg-'))
-    const manifest = { name: 'proj', private: true, dependencies: { '@scope/x': '1.0.0' } }
-    fs.writeFileSync(path.join(cwd, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
+    const manifest = {
+      name: 'proj',
+      private: true,
+      dependencies: { '@scope/x': '1.0.0' },
+    }
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify(manifest, null, 2) + '\n',
+    )
     fs.writeFileSync(
       path.join(cwd, 'yarn.lock'),
       '# yarn lockfile v1\n\n\n"@scope/x@1.0.0":\n  version "1.0.0"\n' +
@@ -128,17 +158,32 @@ describe('manifest gate — integration (patchLockfile on a real project dir)', 
     const scopedRegistry = {
       packument: async (name: string) =>
         name === '@scope/x'
-          ? { name, distTags: { latest: '2.0.0' }, versions: { '1.0.0': { name, version: '1.0.0', dependencies: {} }, '2.0.0': { name, version: '2.0.0', dependencies: {} } } }
+          ? {
+              name,
+              distTags: { latest: '2.0.0' },
+              versions: {
+                '1.0.0': { name, version: '1.0.0', dependencies: {} },
+                '2.0.0': { name, version: '2.0.0', dependencies: {} },
+              },
+            }
           : undefined,
       resolve: async (name: string, range: string) =>
         name === '@scope/x' && sv.satisfies('2.0.0', range)
           ? { name, version: '2.0.0', dependencies: {} }
           : undefined,
     } as any
-    const context: any = { cwd, flags: { silent: true, force: true }, manifest, registry: scopedRegistry }
+    const context: any = {
+      cwd,
+      flags: { silent: true, force: true },
+      manifest,
+      registry: scopedRegistry,
+    }
     context.ctx = context
     await patchLockfile(context)
-    expect(JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf-8')).dependencies['@scope/x']).toBe('2.0.0')
+    expect(
+      JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf-8'))
+        .dependencies['@scope/x'],
+    ).toBe('2.0.0')
     expect(readLock(cwd)).toContain('"@scope/x@2.0.0":')
   })
 
@@ -162,11 +207,24 @@ describe('manifest gate — integration (patchLockfile on a real project dir)', 
       cwd: process.cwd(),
     }
     context.ctx = context
-    const out = format(await patch(parse(berryLock, fmt), report, context, fmt), fmt)
+    const out = format(
+      await patch(parse(berryLock, fmt), report, context, fmt),
+      fmt,
+    )
     expect(context.manifestEdits).toEqual([
-      expect.objectContaining({ name: 'lodash', from: '4.17.11', to: '4.18.0' }),
+      expect.objectContaining({
+        name: 'lodash',
+        from: '4.17.11',
+        to: '4.18.0',
+      }),
     ])
     expect(out).toContain('lodash@npm:4.18.0') // bumped resolution in the berry lock
+    // …and the lockfile's own descriptors follow the rewritten range. Leaving them on
+    // the old one makes yarn re-resolve from package.json, find no matching entry and
+    // reject the lock under `--immutable` (YN0028).
+    expect(out).toContain('"lodash@npm:4.18.0":') // entry key, not just the resolution
+    expect(out).toContain('lodash: "npm:4.18.0"') // the workspace's own edge
+    expect(out).not.toContain('4.17.11') // no stale descriptor left anywhere
   })
 
   // Monorepo: the pin lives in a WORKSPACE package.json, not the root. The gate
@@ -174,18 +232,31 @@ describe('manifest gate — integration (patchLockfile on a real project dir)', 
   const monorepo = (flags: Record<string, any>) => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yaf-ws-'))
     const root = { name: 'root', private: true, workspaces: ['packages/*'] }
-    fs.writeFileSync(path.join(cwd, 'package.json'), JSON.stringify(root, null, 2) + '\n')
+    fs.writeFileSync(
+      path.join(cwd, 'package.json'),
+      JSON.stringify(root, null, 2) + '\n',
+    )
     const wsDir = path.join(cwd, 'packages', 'foo')
     fs.mkdirSync(wsDir, { recursive: true })
     fs.writeFileSync(
       path.join(wsDir, 'package.json'),
-      JSON.stringify({ name: 'foo', dependencies: { lodash: '4.17.11' } }, null, 2) + '\n',
+      JSON.stringify(
+        { name: 'foo', dependencies: { lodash: '4.17.11' } },
+        null,
+        2,
+      ) + '\n',
     )
     fs.writeFileSync(path.join(cwd, 'yarn.lock'), lock('lodash@4.17.11'))
-    const context: any = { cwd, flags: { silent: true, ...flags }, manifest: root, registry }
+    const context: any = {
+      cwd,
+      flags: { silent: true, ...flags },
+      manifest: root,
+      registry,
+    }
     context.ctx = context
     const wsRange = () =>
-      JSON.parse(fs.readFileSync(path.join(wsDir, 'package.json'), 'utf-8')).dependencies.lodash
+      JSON.parse(fs.readFileSync(path.join(wsDir, 'package.json'), 'utf-8'))
+        .dependencies.lodash
     return { cwd, wsDir, context, wsRange }
   }
 
@@ -203,9 +274,9 @@ describe('manifest gate — integration (patchLockfile on a real project dir)', 
     await patchLockfile(context)
     expect(wsRange()).toBe('4.18.0') // the workspace's pin was rewritten
     // root package.json is untouched (it never declared lodash)
-    expect(JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf-8'))).not.toHaveProperty(
-      'dependencies',
-    )
+    expect(
+      JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf-8')),
+    ).not.toHaveProperty('dependencies')
     expect(readLock(cwd)).toContain('lodash@4.18.0:') // bumped in the lock
   })
 })
