@@ -37,7 +37,7 @@
     "build:ts": "cpy --cwd=src/main/ts . ../../../../../../target/ts/",
     "build:esm": "node ./src/scripts/build.cjs --entry=\"./src/main/ts/index.ts:./src/main/ts/cli.ts\"",
     "build:dts": "tsc --emitDeclarationOnly --skipLibCheck --outDir target/dts",
-    "build:docs": "npm_config_yes=true npx -p typedoc@0.28.20 -p typescript@6.0.3 typedoc --options src/main/typedoc",
+    "docs": "npx --yes -p typedoc@0.28.20 -p typescript@6.0.3 typedoc --options src/main/typedoc",
     "postupdate": "yarn && yarn build && yarn test",
     "publish:beta": "npm publish --no-git-tag-version --tag beta",
     "publish:rc": "npm publish --no-git-tag-version --tag rc",
