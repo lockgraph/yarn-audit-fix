@@ -76,7 +76,9 @@ export const printRuntimeDigest: TCallback = ({
   versions,
   manifest,
 }) => {
-  if (flags.silent) {
+  // `--json` promises the summary as the ONLY stdout, so `yaf --json | jq` works;
+  // the digest is human output and would corrupt it.
+  if (flags.silent || flags.json) {
     return
   }
   const isMonorepo = !!manifest.workspaces
@@ -105,7 +107,14 @@ export const patchLockfile: TCallback = async ({ cwd, flags, ctx }) => {
   const lockfileType = getLockfileType(raw)
   // Pass cwd as workspaceRoot so the berry adapter resolves builtin patch hashes,
   // and the project manifest so the graph carries its declared overrides/resolutions.
-  const lockfile = lf.parse(raw, lockfileType, cwd, ctx.manifest)
+  // With manifest anchors, a yarn-classic descriptor nothing declares is pruned. That is
+  // the point of the anchors — but it must be visible, so collect those and report them.
+  const pruned: string[] = []
+  const lockfile = lf.parse(raw, lockfileType, cwd, ctx.manifest, (d) => {
+    if (d.code === 'YARN_CLASSIC_ROOT_DESCRIPTOR_UNREQUESTED' && d.message)
+      pruned.push(d.message)
+  })
+  if (pruned.length > 0) ctx.prunedDescriptors = pruned
   // Captured off the fresh parse because `patch` returns a different graph. Not
   // passed to `format` — lockgraph carries the override policy and re-emits it.
   const overrides = lockfile.overrides()
@@ -143,8 +152,11 @@ export const patchLockfile: TCallback = async ({ cwd, flags, ctx }) => {
     if (ctx.signal?.aborted) throw new Error('aborted')
     // The single write lands only after a successful in-memory patch, so a
     // failure leaves the original lockfile untouched. `--dry-run` skips it.
+    // Serialize even under `--dry-run`, and throw it away: `format` is strict, so
+    // skipping it made the preview green for runs that cannot actually be written.
+    const serialized = format(refurbished, lockfileType)
     if (!flags['dry-run']) {
-      fs.writeFileSync(lockfilePath, format(refurbished, lockfileType))
+      fs.writeFileSync(lockfilePath, serialized)
       // --force may have rewritten direct-dep ranges the fix fell outside of
       // (npm audit fix --force parity, recorded on ctx by `_patch`) — apply them
       // with a surgical, format-preserving string edit, grouped by the manifest

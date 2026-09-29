@@ -30,6 +30,11 @@ export type TContext = {
   // Machine-readable remediation outcome, recorded by `_patch`; emitted by the CLI
   // path under `--json`. Absent until `_patch` runs.
   summary?: TPatchSummary
+  // Root/workspace descriptors the anchored yarn-classic parse dropped because no
+  // manifest requests them any more, recorded by `patchLockfile`. Surfaced in the report
+  // so a prune is never silent: an incomplete manifest set (an unreadable or gitignored
+  // workspace package.json) would otherwise take live entries out without a word.
+  prunedDescriptors?: string[]
 }
 
 // A package.json direct-dep range rewrite: `"<name>": "<from>"` → `"<name>": "<to>"`,
@@ -47,7 +52,7 @@ export type TManifestEdit = {
 export type TPatchSummary = {
   dryRun: boolean
   upgraded: { name: string; from: string; to: string; severity?: string }[]
-  // `reason`: consumer-range | override-pin | manifest-pin | constraint | out-of-scope
+  // `reason`: consumer-range | override-pin | superseded | manifest-pin | constraint | out-of-scope
   skipped: { package: string; reason: string }[]
   excluded: string[]
   noFix: string[]

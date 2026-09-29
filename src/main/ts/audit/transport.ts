@@ -83,8 +83,57 @@ export const cachingFetch = (
   return wrapped as typeof fetch
 }
 
-/** Fresh shared transport (bounded pool + GET cache) for one build call. */
+export type RetryOptions = {
+  attempts?: number
+  delayMs?: number
+  sleep?: (ms: number) => Promise<void>
+}
+
+/** Worth another go: a dropped socket, a rate limit, or the registry's own 5xx. */
+const retryable = (status: number): boolean =>
+  status === 408 || status === 429 || status >= 500
+
+/**
+ * Retry a registry request through a transient failure, with exponential backoff. One
+ * `fetch failed` used to abort an entire run, and remediation now re-audits its own result
+ * — more rounds, more requests, more chances to be unlucky. Every request yaf makes is a
+ * read (packuments, tarballs, the advisory bulk query, which is a POST only because the
+ * package list is too long for a URL), so replaying one is safe. A 4xx other than 408/429
+ * is an answer, not a failure, and is returned as-is.
+ */
+export const retryingFetch = (
+  base: typeof fetch = defaultFetch,
+  { attempts = 3, delayMs = 200, sleep }: RetryOptions = {},
+): typeof fetch => {
+  const tries = Math.max(1, attempts)
+  const wait =
+    sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const wrapped = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ): Promise<Response> => {
+    let carried: Response | undefined
+    for (let n = 0; n < tries; n++) {
+      if (n > 0) await wait(delayMs * 2 ** (n - 1))
+      try {
+        const res = await base(input, init)
+        if (!retryable(res.status)) return res
+        carried = res
+      } catch (e) {
+        if (n === tries - 1) throw e
+      }
+    }
+    // Out of attempts with a retryable status: hand the last response back so the caller
+    // reports the registry's own error rather than a synthetic one.
+    return carried as Response
+  }
+  return wrapped as typeof fetch
+}
+
+/** Fresh shared transport (bounded pool + retry + GET cache) for one build call. */
 export const buildTransport = (): { fetch: typeof fetch; limit: Limiter } => ({
-  fetch: cachingFetch(defaultFetch),
+  // Retry inside the cache, so a transient failure is replayed before anything is
+  // memoized and one success serves every caller.
+  fetch: cachingFetch(retryingFetch(defaultFetch)),
   limit: createLimiter(MAX_CONCURRENCY),
 })

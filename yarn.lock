@@ -2371,9 +2371,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lockgraph@npm:^0.8.1":
-  version: 0.8.1
-  resolution: "lockgraph@npm:0.8.1"
+"lockgraph@npm:^0.9.0":
+  version: 0.9.0
+  resolution: "lockgraph@npm:0.9.0"
   dependencies:
     node-fetch-native: "npm:^1.6.7"
     pako: "npm:^3.0.1"
@@ -2383,7 +2383,7 @@ __metadata:
   peerDependenciesMeta:
     "@yarnpkg/libzip":
       optional: true
-  checksum: 10c0/9c5fc179ee9a512453c554fa03d90396c7550d0dd2b16a93f340b00f1e6533d0c781d58da49af5aa7e36a6be7e1aaeac5551bd51fd680c75adf86b69d0f4726f
+  checksum: 10c0/fec81616f73538daf0f5a97f05f6ee79444ebf6d24b5bc82d71640df9d731a256adc8bf1aa44cedfe4f7040b38a60f704657680345dc7a3bd17408a5658372bd
   languageName: node
   linkType: hard
 
@@ -3487,9 +3487,9 @@ __metadata:
   linkType: hard
 
 "undici@npm:^8.4.1":
-  version: 8.10.0
-  resolution: "undici@npm:8.10.0"
-  checksum: 10c0/37ae2b1db8f65c3a003504e2040e96887b99f9db16ba07dcf49c37ed8b7f8c72f4452f2d46f52f7c9e49518fe8325e3b5e7e02ac3a2424886bd67d4b62a0ecab
+  version: 8.10.2
+  resolution: "undici@npm:8.10.2"
+  checksum: 10c0/66d7fc69149207cab570d6abbc9e965b6afe1ae889a7d46945b431165c973d6a56f3dd8b70a856e7ae1e550b6366a1cde6f06e68640587f0dadca38de72995ee
   languageName: node
   linkType: hard
 
@@ -3767,7 +3767,7 @@ __metadata:
     esbuild: "npm:^0.28.2"
     esbuild-node-externals: "npm:^2.0.0"
     fast-glob: "npm:^3.3.3"
-    lockgraph: "npm:^0.8.1"
+    lockgraph: "npm:^0.9.0"
     minimist: "npm:^1.2.8"
     mkdirp: "npm:^3.0.1"
     oxlint: "npm:^1.80.0"

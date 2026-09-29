@@ -1,10 +1,12 @@
 import sv from 'semver'
 
-import type { Graph } from 'lockgraph'
+import { modify } from 'lockgraph'
+import type { FormatId, Graph, NodeId } from 'lockgraph'
 
 import type { Ledger, Plan } from './report'
+import { workspaceKey } from './manifest'
+
 import type { TContext, TManifestEdit } from '../ifaces'
-import { normalizeRange } from './plan'
 
 /** Widen a declared range to admit `fix`, preserving the pin operator
  * (`^`/`~`/exact; anything else → caret): `4.17.11`→`4.18.0`, `~4.1`→`~4.18.0`. */
@@ -18,29 +20,6 @@ const widenRange = (declared: string, fix: string): string => {
         ? ''
         : '^'
   return op + fix
-}
-
-/**
- * Consumers whose declared range the fix would fall outside of. A consumer that is
- * itself being bumped is exempt — its deps get re-derived from the registry.
- */
-const consumersBrokenBy = (
-  graph: Graph,
-  p: Plan,
-  planNames: ReadonlySet<string>,
-): Set<string> | undefined => {
-  let breaks: Set<string> | undefined
-  for (const from of p.froms)
-    for (const edge of graph.in(from.id)) {
-      const consumer = graph.getNode(edge.source)
-      if (consumer && planNames.has(consumer.name)) continue // bumped too
-      const range = normalizeRange(edge.attributes?.range)
-      if (range && !sv.satisfies(p.fix, range))
-        (breaks ??= new Set()).add(
-          `${edge.source} wants "${edge.attributes!.range}"`,
-        )
-    }
-  return breaks
 }
 
 /**
@@ -88,81 +67,53 @@ export const gateByManifest = (
 }
 
 /**
- * `--force` rewrites the declared range in package.json, but the lockfile still keys the
- * entry — and the workspace's own edge — by the OLD descriptor. yarn then re-resolves
- * from the manifest, finds no entry for the new range and rejects the lock under
- * `--immutable` (YN0028). Re-point those edges at the rewritten range so the two agree.
+ * `--force` just rewrote a declared range in package.json; move the lockfile's own
+ * declaration with it, or yarn re-resolves that dep, finds no entry for the new range
+ * and rejects the lock under `--immutable` (YN0028). `replaceRange` is the modify op for
+ * a DECLARED range, as `replaceVersion` is for a resolved version, and it takes the one
+ * root/workspace node that declares it — so a rewrite in one workspace leaves its
+ * siblings alone.
  *
- * Only edges out of a workspace node carry a declared range; a rootless yarn-classic
- * lock has none, so this no-ops there.
+ * Runs after the apply phase, over the edits whose bump actually landed. The bumped
+ * version is in the graph by then, so the new range binds immediately and nothing is
+ * left pending; a bump the apply phase withdrew never gets here, so there is nothing to
+ * undo. `from` guards against rewriting a declaration that has since moved — lockgraph
+ * ignores the optional `npm:` prefix on both sides, so the yarn spelling is safe.
  */
-export const realignManifestDescriptors = (
+export const retargetDeclarations = async (
   graph: Graph,
   edits: readonly TManifestEdit[],
-): Graph => {
-  if (edits.length === 0) return graph
-  const wanted = new Map(edits.map((e) => [e.name, e]))
+  target: FormatId,
+  cwd: string | undefined,
+): Promise<Graph> => {
   let next = graph
-  for (const node of graph.nodes()) {
-    if (node.workspacePath === undefined) continue
-    for (const edge of graph.out(node.id)) {
-      const target = graph.getNode(edge.target)
-      const range = rewrittenRange(
-        edge.attributes?.range,
-        target && wanted.get(target.name),
-      )
-      if (range === undefined) continue
-      next = next.mutate((m) => {
-        m.removeEdge(edge.source, edge.target, edge.kind)
-        m.addEdge(edge.source, edge.target, edge.kind, {
-          ...edge.attributes,
-          range,
-        })
-      }).graph
-    }
+  for (const edit of edits) {
+    const parent = declaringNode(next, edit.file, cwd)
+    if (parent === undefined) continue
+    const res = await modify(
+      next,
+      {
+        kind: 'replaceRange',
+        parent,
+        name: edit.name,
+        to: edit.to,
+        from: edit.from,
+      },
+      { target },
+    )
+    next = res.graph
   }
   return next
 }
 
-/**
- * The range this edge should carry after a `--force` manifest rewrite, or `undefined`
- * when it isn't the declaration that was rewritten. Yarn's `npm:` protocol is optional
- * on the edge, so whichever form it used is preserved.
- */
-const rewrittenRange = (
-  raw: unknown,
-  edit: TManifestEdit | undefined,
-): string | undefined => {
-  if (!edit || typeof raw !== 'string') return undefined
-  const proto = raw.startsWith('npm:') ? 'npm:' : ''
-  return raw.slice(proto.length) === edit.from
-    ? `${proto}${edit.to}`
-    : undefined
-}
-
-/**
- * Pass 2 — skip a fix that falls outside a *surviving* consumer's declared range
- * (unless `--force`). A consumer that is itself being bumped is exempt: its deps are
- * re-derived from the registry.
- */
-export const gateByConsumers = (
+/** The root/workspace node that owns a manifest file, found by its `workspacePath`. */
+const declaringNode = (
   graph: Graph,
-  gatedPlans: readonly Plan[],
-  flags: TContext['flags'],
-  ledger: Ledger,
-): Plan[] => {
-  const { incompatible } = ledger
-  const planNames = new Set(gatedPlans.map((p) => p.name))
-  const upgrades: Plan[] = []
-  for (const p of gatedPlans) {
-    const breaks = flags.force
-      ? undefined
-      : consumersBrokenBy(graph, p, planNames)
-    if (breaks?.size) {
-      incompatible.set(`${p.name}@${p.froms[0].version} → ${p.fix}`, breaks)
-      continue
-    }
-    upgrades.push(p)
-  }
-  return upgrades
+  file: string,
+  cwd: string | undefined,
+): NodeId | undefined => {
+  const want = workspaceKey(file, cwd)
+  for (const node of graph.nodes())
+    if (node.workspacePath === want) return node.id as NodeId
+  return undefined
 }

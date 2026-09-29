@@ -13,18 +13,17 @@ import {
   buildTarballSource,
   ecosystemFor,
 } from './audit/adapter'
-import { collectManifestFiles, manifestDirectRanges } from './audit/manifest'
+import {
+  collectManifestFiles,
+  manifestDirectRanges,
+  manifestsByWorkspace,
+} from './audit/manifest'
+import { packumentLookups } from './audit/packuments'
 import { toPolicy } from './audit/overrides'
 import { resolvePolicy } from './audit/policy'
 import { parsePackageRules } from './audit/filter'
-import { resolveScope } from './audit/scope'
-import { applyBatch, applyConstrained } from './audit/apply'
-import {
-  gateByConsumers,
-  gateByManifest,
-  realignManifestDescriptors,
-} from './audit/gates'
-import { planUpgrades } from './audit/plan'
+import { retargetDeclarations } from './audit/gates'
+import { remediate } from './audit/remediate'
 import type { ApplyDeps } from './audit/apply'
 import { buildSummary, deferredReasons, renderReport } from './audit/report'
 import type { ConstraintSkip, Ledger, Plan } from './audit/report'
@@ -45,6 +44,7 @@ export const _parse = (
   lockfileType: TLockfileType,
   workspaceRoot?: string,
   manifest?: Record<string, any>,
+  onDiagnostic?: (d: { code?: string; message?: string }) => void,
 ): TLockfileObject => {
   if (lockfileType === undefined) {
     throw new Error('Unsupported lockfile format')
@@ -56,7 +56,16 @@ export const _parse = (
   const policy = toPolicy(manifest, ecosystemFor(lockfileType))
   return lfParse(lockfile, lockfileType as FormatId, {
     cwd: workspaceRoot,
+    // Anchors exist for the one format that needs them: a yarn v1 lock has no entry for
+    // the root or its workspaces, so only a manifest can tell a root-held descriptor from
+    // a stale one. Every other format carries its root in the lock, and an empty or
+    // partial manifest would just prune live entries.
+    manifests:
+      manifest && lockfileType === 'yarn-classic'
+        ? manifestsByWorkspace(workspaceRoot, manifest)
+        : undefined,
     sources: policy ? { policy } : undefined,
+    onDiagnostic,
   })
 }
 
@@ -147,10 +156,8 @@ export const _patch = async (
   // (`manifestEdits`, applied per-file by patchLockfile).
   const manifestFiles = collectManifestFiles(ctx.cwd, ctx.manifest)
   const directRanges = manifestDirectRanges(manifestFiles)
-  // Fix scope (`--production` / `--workspace`): the set of node ids reachable from
-  // the scoped roots. `undefined` ⇒ no scope flag ⇒ no filtering (unchanged). A
-  // vulnerable node outside it is left for a deliberate, unscoped run and reported.
-  const inScope = resolveScope(flags, graph, manifestFiles, ctx.cwd)
+  // Fix scope (`--production` / `--workspace`) is re-derived inside each remediation
+  // round, since node ids move with every applied bump.
   const scopeSkipped = new Set<string>()
   const manifestPinned = new Map<string, { range: string; file: string }[]>()
   const manifestEdits: TManifestEdit[] = []
@@ -168,92 +175,91 @@ export const _patch = async (
     manifestPinned,
     constraintSkipped,
     manifestEdits,
+    // Filled by the apply phase: a bump an earlier one in the same batch made moot.
+    superseded: new Map(),
+    // Parents this run moved up so a pinned transitive fix could land.
+    raised: new Map(),
   }
 
-  // Lowest published version that clears the advisory (minimal bump), read from
-  // the registry packument.
-  const packCache = new Map<
-    string,
-    Awaited<ReturnType<typeof registry.packument>>
-  >()
-  const lowestFix = async (
-    name: string,
-    range: string,
-  ): Promise<string | undefined> => {
-    if (!packCache.has(name))
-      packCache.set(name, await registry.packument(name))
-    const pack = packCache.get(name)
-    if (!pack) return undefined
-    return Object.keys(pack.versions)
-      .filter((v) => sv.valid(v) && sv.satisfies(v, range))
-      .sort(sv.compare)[0] // undefined ⇒ nothing published clears it
-  }
+  const { lowestFix, declaredRange, versionsAdmitting } =
+    packumentLookups(registry)
 
-  const plans = await planUpgrades({
-    graph,
-    report,
-    ctx,
-    overrides,
-    inScope,
-    excludeRules,
-    lowestFix,
-    ledger,
-  })
-  const gatedPlans = gateByManifest(plans, directRanges, flags, ledger)
-  if (manifestEdits.length > 0) ctx.manifestEdits = manifestEdits
-  const upgrades = gateByConsumers(graph, gatedPlans, flags, ledger)
-
-  // Apply: rebind each vulnerable range to its fix, complete the new transitive
-  // closure, then drop whatever got orphaned. `applied` is the set that actually
-  // lands — identical to `upgrades` unless the engine gate below drops one.
-  const applied: Plan[] = []
-  const completionDiagnostics: {
-    severity: string
-    code: string
-    message: string
-  }[] = []
   // Live count of nodes pulled in (the slow part — a packument fetch each).
   let completed = 0
   const onCompletionDiag = (d: { code?: string }): void => {
     if (d.code === 'COMPLETION_NODE_ADDED')
       ctx.progress?.label(`Completing the tree… ${++completed}`)
   }
-  // Honor the project's declared pins: a NEW closure edge governed by an override
-  // binds the pinned target verbatim (before the registry rung), so the completed
-  // tree never contradicts `overrides`/`resolutions`.
-  const overrideList = [...overrides]
 
   const applyDeps: ApplyDeps = {
     target: lockfileType as FormatId,
     registry,
-    overrideList,
+    overrideList: [...overrides],
     onCompletionDiag,
   }
-  const outcome =
-    constraints.length === 0
-      ? await applyBatch(graph, upgrades, applyDeps)
-      : await applyConstrained(
-          graph,
-          upgrades,
-          applyDeps,
-          { constraints, constraintSummary, onConflict },
-          constraintSkipped,
-        )
+  const outcome = await remediate({
+    graph,
+    report,
+    ctx,
+    overrides,
+    excludeRules,
+    manifestFiles,
+    directRanges,
+    ledger,
+    lookups: { lowestFix, declaredRange, versionsAdmitting },
+    policy: { constraints, constraintSummary, onConflict },
+    applyDeps,
+    constraintSkipped,
+  })
   graph = outcome.graph
-  applied.push(...outcome.applied)
-  completionDiagnostics.push(...outcome.diagnostics)
-  // `--force` just rewrote declared ranges in package.json; bring the lockfile's own
-  // descriptors along so yarn doesn't re-resolve and reject the result.
-  graph = realignManifestDescriptors(graph, manifestEdits)
+  const applied: Plan[] = outcome.applied
+  const completionDiagnostics = outcome.diagnostics
+  const inScope = outcome.inScope
 
-  ctx.summary = buildSummary(!!flags['dry-run'], ledger, applied, report)
+  // A gate let the bump through, but the apply phase can still drop it — a constraint
+  // rejects its closure, or an earlier bump in the batch supersedes it. Rewriting
+  // package.json for a bump that never landed would leave the declaration demanding a
+  // version the lock does not hold, which is the one thing yarn refuses to install
+  // around: it re-resolves and rewrites the lockfile. So keep only the landed edits,
+  // and keep the ledger in step so the report names what is actually on disk.
+  const landed = new Set(applied.map((p) => p.name))
+  const dropped = manifestEdits.filter((e) => !landed.has(e.name))
+  if (dropped.length > 0)
+    manifestEdits.splice(
+      0,
+      manifestEdits.length,
+      ...manifestEdits.filter((e) => landed.has(e.name)),
+    )
+  if (manifestEdits.length > 0) ctx.manifestEdits = manifestEdits
+
+  // `--force` just rewrote declared ranges in package.json; bring the lockfile's own
+  // declarations along so yarn doesn't re-resolve and reject the result. After the apply
+  // phase the bumped version is already in the graph, so each declaration binds to it at
+  // once — no pending state, no second completion.
+  graph = await retargetDeclarations(
+    graph,
+    manifestEdits,
+    lockfileType as FormatId,
+    ctx.cwd,
+  )
+
+  // Report what the user GETS, not what we asked for: the planned fix is a floor,
+  // and completion resolves each descriptor to the highest match — so `^1.1.18`
+  // lands on 1.1.21. Reading it back off the final graph keeps both the printed
+  // report and the `--json` contract honest.
+  const settled = applied.map((u) => ({
+    ...u,
+    fix: deliveredFix(graph as Graph, u.name, u.fix),
+  }))
+
+  ctx.summary = buildSummary(!!flags['dry-run'], ledger, settled, report)
 
   if (!flags.silent && !flags.json)
     renderReport({
       ctx,
       policy: { constraintSummary, engineTargets },
       ledger,
-      applied,
+      applied: settled,
       report,
       inScope,
       completionDiagnostics,
@@ -262,13 +268,55 @@ export const _patch = async (
   return graph
 }
 
-/** Node ids present in `next` but not in `base` — everything the patch introduced. */
-const addedNodes = (base: Graph, next: Graph): ReadonlySet<NodeId> => {
+/**
+ * The version the final lock bound for an applied fix. The planned fix is only a
+ * floor: completion resolves each descriptor to the highest match (`^1.1.18` → 1.1.21),
+ * and a parent's own bump can change what it asks for, retiring the line entirely
+ * (a `minimatch` bump moving from `brace-expansion@^2.0.1` to `^5.0.2`). So prefer the
+ * node still in the planned major, else the single higher line that replaced it, and
+ * keep the planned number when neither is unambiguous — a wrong version in the report
+ * is no better than a stale one.
+ */
+const deliveredFix = (graph: Graph, name: string, planned: string): string => {
+  if (!sv.valid(planned)) return planned
+  const atLeastPlanned = graph
+    .byName(name)
+    .map((id) => graph.getNode(id)?.version)
+    .filter(
+      (v): v is string => !!v && sv.valid(v) !== null && sv.gte(v, planned),
+    )
+  const sameMajor = atLeastPlanned.filter(
+    (v) => sv.major(v) === sv.major(planned),
+  )
+  for (const candidates of [sameMajor, atLeastPlanned])
+    if (candidates.length === 1) return candidates[0]
+  return planned
+}
+
+const hasBerryChecksum = (g: Graph, id: NodeId): boolean =>
+  (g.tarballOf(id)?.integrity?.hashes ?? []).some(
+    (h) => h.origin === 'berry-zip',
+  )
+
+/**
+ * What `refurbish` has to look at: everything the patch introduced, plus any node
+ * that had a berry checksum in the input lock and no longer does. The second set
+ * matters because the diff is by node id — a node re-minted from a packument at the
+ * same name@version keeps its id, so it reads as untouched while its checksum is
+ * gone. That absence is ours, not yarn's: a package yarn deliberately left bare
+ * (platform-gated optional dep) never carried one to begin with, so it stays out.
+ */
+const refurbishSeed = (base: Graph, next: Graph): ReadonlySet<NodeId> => {
   const before = new Set<NodeId>()
   for (const n of base.nodes()) before.add(n.id)
-  const added = new Set<NodeId>()
-  for (const n of next.nodes()) if (!before.has(n.id)) added.add(n.id)
-  return added
+  const seed = new Set<NodeId>()
+  for (const n of next.nodes())
+    if (
+      !before.has(n.id) ||
+      (hasBerryChecksum(base, n.id) && !hasBerryChecksum(next, n.id))
+    )
+      seed.add(n.id)
+  return seed
 }
 
 /**
@@ -307,7 +355,7 @@ export const _refurbish = async (
     lockfileType as FormatId,
     source,
     {
-      seed: base && addedNodes(base as Graph, lockfile as Graph),
+      seed: base && refurbishSeed(base as Graph, lockfile as Graph),
       onDiagnostic: (d: { code?: string }) => {
         if (d.code === 'ENRICH_FIELD_FILLED')
           ctx.progress?.label(`Recomputing checksums… ${++filled}`)

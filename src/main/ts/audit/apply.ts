@@ -21,6 +21,8 @@ export type ApplyResult = {
   graph: Graph
   applied: Plan[]
   diagnostics: { severity: string; code: string; message: string }[]
+  // Bumps that became moot mid-batch, and which upgrade made them so.
+  superseded: Map<string, Set<string>>
 }
 
 /**
@@ -39,7 +41,26 @@ export const applyBatch = async (
   // parallel packument prefetch batches across all upgrades.
   const recentlyAdded = new Set<NodeId>()
   const recentlyOrphaned = new Set<NodeId>()
+  // Which upgrade stranded a node, so a skip can say what superseded it.
+  const orphanedBy = new Map<NodeId, string>()
+  const superseded = new Map<string, Set<string>>()
   for (const u of upgrades) {
+    // An earlier bump in this batch may have stranded the very nodes this one
+    // targets — a new parent no longer requests the old version. Rebinding them
+    // anyway mints a replacement that is unreachable from the start: it lands in
+    // `frontier.added`, never in `orphaned`, so the seeded prune cannot reach it and
+    // the lock keeps an entry yarn then wants to delete (YN0028). The bump is moot
+    // in that case, so skip it rather than create the orphan.
+    if (u.froms.every((f) => recentlyOrphaned.has(f.id))) {
+      superseded.set(
+        `${u.name}@${u.froms[0].version} → ${u.fix}`,
+        new Set(
+          u.froms.map((f) => orphanedBy.get(f.id) ?? 'an earlier upgrade'),
+        ),
+      )
+      continue
+    }
+
     const res = await modify(
       graph,
       {
@@ -51,7 +72,10 @@ export const applyBatch = async (
     )
     graph = res.graph
     res.frontier.added.forEach((id) => recentlyAdded.add(id))
-    res.frontier.orphaned.forEach((id) => recentlyOrphaned.add(id))
+    res.frontier.orphaned.forEach((id) => {
+      recentlyOrphaned.add(id)
+      if (!orphanedBy.has(id)) orphanedBy.set(id, `${u.name}@${u.fix}`)
+    })
     applied.push(u)
   }
   if (recentlyAdded.size > 0 || recentlyOrphaned.size > 0) {
@@ -71,7 +95,7 @@ export const applyBatch = async (
     graph = completion.graph
     diagnostics.push(...completion.diagnostics)
   }
-  return { graph, applied, diagnostics }
+  return { graph, applied, diagnostics, superseded }
 }
 
 /**
@@ -186,5 +210,5 @@ export const applyConstrained = async (
     applied.push(u)
   }
   void touched // each per-upgrade completion prunes its own orphans (seed-scoped)
-  return { graph, applied, diagnostics }
+  return { graph, applied, diagnostics, superseded: new Map() }
 }

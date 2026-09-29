@@ -101,9 +101,43 @@ export type PlanInput = {
   overrides: readonly OverrideConstraint[]
   inScope: ReadonlySet<NodeId> | undefined
   excludeRules: ReturnType<typeof parsePackageRules>
-  lowestFix: (name: string, range: string) => Promise<string | undefined>
+  lowestFix: (
+    name: string,
+    vulnerable: string,
+    floor: string,
+  ) => Promise<string | undefined>
   ledger: Ledger
 }
+
+/**
+ * Resolve each vulnerable node's own minimal fix and group the nodes that land on
+ * the same one. A node with nothing published above it outside every vulnerable
+ * range is recorded as unfixable rather than dragged onto another line's remedy.
+ */
+const groupByFix = async <T extends { name: string; version: string }>(
+  name: string,
+  kept: readonly T[],
+  vulnerable: string,
+  lowestFix: PlanInput['lowestFix'],
+  noFix: Set<string>,
+): Promise<Map<string, T[]>> => {
+  const byFix = new Map<string, T[]>()
+  for (const n of kept) {
+    const fix = await lowestFix(name, vulnerable, n.version)
+    if (fix === undefined) {
+      noFix.add(`${n.name}@${n.version}`)
+      continue
+    }
+    const group = byFix.get(fix)
+    if (group) group.push(n)
+    else byFix.set(fix, [n])
+  }
+  return byFix
+}
+
+/** A plan's `replaceVersion` selector: exactly the versions it covers. */
+export const fromRangeOf = (froms: readonly { version: string }[]): string =>
+  [...new Set(froms.map((n) => n.version))].join(' || ')
 
 export const planUpgrades = async ({
   graph,
@@ -138,28 +172,31 @@ export const planUpgrades = async ({
     )
     if (kept.length === 0) continue
 
-    const fix = await lowestFix(name, advisory.patched_versions)
-    if (fix === undefined) {
-      kept.forEach((n) => noFix.add(`${n.name}@${n.version}`))
-      continue
-    }
-
-    const blockedBy = blockingOverride(graph, name, kept, overrides, fix)
-    if (blockedBy !== undefined) {
-      kept.forEach((n) => pinned.set(`${n.name}@${n.version}`, blockedBy))
-      continue
-    }
-
-    // skip versions already at/above the fix — keeps re-runs idempotent
-    const froms = kept.filter((n) => sv.lt(n.version, fix))
-    if (froms.length === 0) continue
-
-    plans.push({
+    // Each vulnerable node gets its OWN minimal fix, so a 1.x node takes the 1.x
+    // remedy while a 2.x node takes the 2.x one. Nodes that land on the same fix
+    // share a plan; the plan's `fromRange` then names exactly those versions, so
+    // `replaceVersion` rebinds that group and nothing else.
+    const byFix = await groupByFix(
       name,
-      fromRange: advisory.vulnerable_versions,
-      fix,
-      froms: froms.map((n) => ({ id: n.id as NodeId, version: n.version })),
-    })
+      kept,
+      advisory.vulnerable_versions,
+      lowestFix,
+      noFix,
+    )
+
+    for (const [fix, froms] of byFix) {
+      const blockedBy = blockingOverride(graph, name, froms, overrides, fix)
+      if (blockedBy !== undefined) {
+        froms.forEach((n) => pinned.set(`${n.name}@${n.version}`, blockedBy))
+        continue
+      }
+      plans.push({
+        name,
+        fromRange: fromRangeOf(froms),
+        fix,
+        froms: froms.map((n) => ({ id: n.id as NodeId, version: n.version })),
+      })
+    }
   }
   return plans
 }

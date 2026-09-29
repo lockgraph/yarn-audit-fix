@@ -4,6 +4,7 @@ import {
   buildTransport,
   cachingFetch,
   createLimiter,
+  retryingFetch,
 } from '../../main/ts/audit/transport'
 
 const tick = () => new Promise((r) => setImmediate(r))
@@ -91,7 +92,9 @@ describe('cachingFetch', () => {
     let calls = 0
     const base = (async (input: string) => {
       calls++
-      return new Response(JSON.stringify({ url: String(input) }), { status: 200 })
+      return new Response(JSON.stringify({ url: String(input) }), {
+        status: 200,
+      })
     }) as typeof fetch
     const f = cachingFetch(base)
     const [a, b] = await Promise.all([f('https://r/pkg'), f('https://r/pkg')])
@@ -120,8 +123,14 @@ describe('cachingFetch', () => {
     }) as typeof fetch
     const f = cachingFetch(base)
     const body = JSON.stringify({ a: ['1'] })
-    await f('https://r/-/npm/v1/security/advisories/bulk', { method: 'POST', body })
-    await f('https://r/-/npm/v1/security/advisories/bulk', { method: 'POST', body })
+    await f('https://r/-/npm/v1/security/advisories/bulk', {
+      method: 'POST',
+      body,
+    })
+    await f('https://r/-/npm/v1/security/advisories/bulk', {
+      method: 'POST',
+      body,
+    })
     expect(calls).toBe(2)
   })
 
@@ -151,6 +160,71 @@ describe('cachingFetch', () => {
     const retried = await f('https://r/pkg')
     expect(retried.status).toBe(200) // retried, not poisoned
     expect(calls).toBe(2)
+  })
+})
+
+describe('retryingFetch', () => {
+  // No real waiting: the backoff is injected so the test measures the policy, not the clock.
+  const slept: number[] = []
+  const sleep = async (ms: number) => void slept.push(ms)
+  const res = (status: number) => new Response('{}', { status })
+
+  it('replays a dropped socket and returns the eventual success', async () => {
+    slept.length = 0
+    let calls = 0
+    const base = (async () => {
+      calls++
+      if (calls === 1) throw new TypeError('fetch failed')
+      return res(200)
+    }) as unknown as typeof fetch
+    const r = await retryingFetch(base, { delayMs: 10, sleep })('https://r/x')
+    expect(r.status).toBe(200)
+    expect(calls).toBe(2)
+    expect(slept).toEqual([10]) // backed off once before the retry
+  })
+
+  it('replays a 503 and backs off exponentially', async () => {
+    slept.length = 0
+    let calls = 0
+    const base = (async () =>
+      res(++calls < 3 ? 503 : 200)) as unknown as typeof fetch
+    const r = await retryingFetch(base, { delayMs: 10, sleep })('https://r/x')
+    expect(r.status).toBe(200)
+    expect(slept).toEqual([10, 20])
+  })
+
+  // A 404 is the registry answering "no such package" — retrying it only wastes time.
+  it('does not retry a 404', async () => {
+    let calls = 0
+    const base = (async () => {
+      calls++
+      return res(404)
+    }) as unknown as typeof fetch
+    expect((await retryingFetch(base, { sleep })('https://r/x')).status).toBe(
+      404,
+    )
+    expect(calls).toBe(1)
+  })
+
+  it('gives up and rethrows once the attempts are spent', async () => {
+    let calls = 0
+    const base = (async () => {
+      calls++
+      throw new TypeError('fetch failed')
+    }) as unknown as typeof fetch
+    await expect(
+      retryingFetch(base, { attempts: 2, delayMs: 1, sleep })('https://r/x'),
+    ).rejects.toThrow('fetch failed')
+    expect(calls).toBe(2)
+  })
+
+  // Out of attempts on a 5xx: hand back the registry's own response, not a synthetic error.
+  it('returns the last response when every attempt is a 5xx', async () => {
+    const base = (async () => res(502)) as unknown as typeof fetch
+    const r = await retryingFetch(base, { attempts: 2, delayMs: 1, sleep })(
+      'https://r/x',
+    )
+    expect(r.status).toBe(502)
   })
 })
 

@@ -93,6 +93,56 @@ export const printManifestEdits = (
     log(`  ${e.name}: "${e.from}" → "${e.to}"${manifestWhere(e.file, cwd)}`)
 }
 
+/**
+ * A bump an earlier upgrade in the same run made moot: the fix re-derived its own
+ * deps, so the node this one targeted is no longer in the tree. Nothing to act on —
+ * but the line would otherwise vanish from the report without explanation.
+ */
+export const printSupersededSkips = (
+  log: (s: string) => void,
+  superseded: Ledger['superseded'],
+): void => {
+  if (superseded.size === 0) return
+  log('Superseded (an earlier upgrade already replaced these):')
+  for (const [spec, causes] of [...superseded].sort()) {
+    log(`  ${spec}`)
+    for (const c of [...causes].sort()) log(`    - by ${c}`)
+  }
+}
+
+/**
+ * Parents moved up so a pinned transitive fix could land. Not a skip — but the user did
+ * not ask for these versions, so each one names the dep it was raised for.
+ */
+export const printRaises = (
+  log: (s: string) => void,
+  raised: Ledger['raised'],
+): void => {
+  if (raised.size === 0) return
+  log('Raised past its own fix, to clear a dep it pinned:')
+  for (const [spec, deps] of [...raised].sort())
+    log(`  ${spec} — to clear ${[...deps].sort().join(', ')}`)
+}
+
+/**
+ * Descriptors the anchored parse dropped because no package.json requests them. Usually
+ * housekeeping yarn would do anyway — but if a workspace manifest was unreadable, this is
+ * where its dependencies quietly went, so the count is never hidden.
+ */
+export const printPrunedDescriptors = (
+  warn: (s: string) => void,
+  pruned: readonly string[] | undefined,
+  verbose: boolean,
+): void => {
+  if (!pruned?.length) return
+  warn(
+    `Dropped ${pruned.length} lockfile descriptor(s) no package.json requests${verbose ? ':' : ' (--verbose to list)'}`,
+  )
+  // lockgraph phrases these as full sentences; the descriptor is the useful part.
+  const descriptors = pruned.map((line) => /"([^"]+)"/.exec(line)?.[1] ?? line)
+  if (verbose) for (const d of [...descriptors].sort()) warn(`  ${d}`)
+}
+
 /** Skips the engineer has to act on — each names what to change to remediate. */
 export const printActionableSkips = (
   log: (s: string) => void,
@@ -101,6 +151,9 @@ export const printActionableSkips = (
   ledger: Ledger,
   constraintSummary: string,
 ): void => {
+  printPrunedDescriptors(warn, ctx.prunedDescriptors, !!ctx.flags.verbose)
+  printRaises(log, ledger.raised)
+  printSupersededSkips(log, ledger.superseded)
   printConsumerSkips(warn, ledger.incompatible)
   printOverrideSkips(warn, ledger.pinned)
   printManifestSkips(warn, ledger.manifestPinned, ctx.cwd)

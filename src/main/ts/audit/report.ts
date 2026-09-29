@@ -73,6 +73,11 @@ export type Ledger = {
   manifestPinned: Map<string, { range: string; file: string }[]>
   constraintSkipped: Map<string, ConstraintSkip>
   manifestEdits: TManifestEdit[]
+  superseded: Map<string, Set<string>>
+  // "parent@its own fix" → the deps that raise was made for. Deliberately not the
+  // destination: a later round can raise the same parent further, and the version the
+  // user actually gets is the one in `upgraded`.
+  raised: Map<string, Set<string>>
 }
 
 /**
@@ -89,19 +94,23 @@ export const buildSummary = (
   const seen = new Set<string>()
   return {
     dryRun,
-    upgraded: applied.flatMap((u) => {
-      const head = `${u.name}@${u.froms[0].version} → ${u.fix}`
-      if (seen.has(head)) return []
-      seen.add(head)
-      return [
-        {
-          name: u.name,
-          from: u.froms[0].version,
-          to: u.fix,
-          severity: report[u.name]?.severity,
-        },
-      ]
-    }),
+    // One entry per vulnerable node the plan covers — a plan groups every node that
+    // lands on the same fix, so reporting only the first hides the others.
+    upgraded: applied.flatMap((u) =>
+      u.froms.flatMap((f) => {
+        const head = `${u.name}@${f.version} → ${u.fix}`
+        if (seen.has(head)) return []
+        seen.add(head)
+        return [
+          {
+            name: u.name,
+            from: f.version,
+            to: u.fix,
+            severity: report[u.name]?.severity,
+          },
+        ]
+      }),
+    ),
     skipped: [
       ...[...ledger.incompatible.keys()].map((p) => ({
         package: p,
@@ -110,6 +119,10 @@ export const buildSummary = (
       ...[...ledger.pinned.keys()].map((p) => ({
         package: p,
         reason: 'override-pin',
+      })),
+      ...[...ledger.superseded.keys()].map((p) => ({
+        package: p,
+        reason: 'superseded',
       })),
       ...[...ledger.manifestPinned.keys()].map((p) => ({
         package: p,
@@ -247,12 +260,13 @@ export const renderReport = ({
   // Dedupe by from→to; annotate with severity / CVSS / CVE refs.
   const seen = new Set<string>()
   const lines: string[] = []
-  for (const u of applied) {
-    const head = `${u.name}@${u.froms[0].version} → ${u.fix}`
-    if (seen.has(head)) continue
-    seen.add(head)
-    lines.push(head + formatAdvisoryMeta(report[u.name]))
-  }
+  for (const u of applied)
+    for (const f of u.froms) {
+      const head = `${u.name}@${f.version} → ${u.fix}`
+      if (seen.has(head)) continue
+      seen.add(head)
+      lines.push(head + formatAdvisoryMeta(report[u.name]))
+    }
   lines.sort()
   if (lines.length > 0) {
     log(`Upgraded deps (${lines.length}):`)

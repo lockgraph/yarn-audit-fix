@@ -38,6 +38,41 @@ export const collectManifestFiles = (
  * that file (--force). Non-semver ranges (`workspace:`, `npm:` alias, git/file, `*`)
  * are left alone by the caller's `sv.validRange` guard.
  */
+/**
+ * A manifest file's `Node.workspacePath`: `''` for the root, else its directory relative
+ * to the project root in POSIX form. lockgraph keys manifests and `replaceRange` parents
+ * by exactly this, and rejects a key that is absolute, escapes the root, or carries a
+ * Windows separator — so normalise here and nowhere else.
+ */
+export const workspaceKey = (
+  file: string,
+  cwd: string | undefined,
+): string | undefined => {
+  if (!cwd) return ''
+  const rel = path.relative(cwd, path.dirname(file))
+  if (rel === '' || rel === '.') return ''
+  const posix = rel.split(path.sep).join('/')
+  return posix.startsWith('..') ? undefined : posix
+}
+
+/**
+ * The manifests lockgraph anchors a yarn-classic lock against, keyed by workspace path.
+ * With them a root-held descriptor is a request rather than a guess, so prune keeps what
+ * the manifests reach and drops what nothing asks for — and each drop is itemised as a
+ * diagnostic, so an incomplete manifest set is a visible prune, not a silent one.
+ */
+export const manifestsByWorkspace = (
+  cwd: string | undefined,
+  rootManifest: Record<string, any> | undefined,
+): Record<string, Record<string, any>> => {
+  const out: Record<string, Record<string, any>> = {}
+  for (const { file, manifest } of collectManifestFiles(cwd, rootManifest)) {
+    const key = workspaceKey(file, cwd)
+    if (key !== undefined) out[key] = manifest
+  }
+  return out
+}
+
 export const manifestDirectRanges = (
   files: TManifestFile[],
 ): Map<string, { range: string; file: string }[]> => {

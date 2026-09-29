@@ -3,7 +3,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 
 const lf = (await import('../../main/ts/lockfile'))._internal
 const { getContext, run } = await import('../../main/ts')
@@ -36,23 +44,48 @@ const lfPatch = vi.spyOn(lf, '_patch')
 const lfRefurbish = vi.spyOn(lf, '_refurbish')
 const lfFormat = vi.spyOn(lf, '_format')
 
+const projectManifest = JSON.stringify({
+  version: '1.0.0',
+  devDependencies: {
+    '@antongolub/repeater': '^1.4.0',
+    '@qiwi/libdefkit': '^2.1.8',
+    '@qiwi/substrate': '^1.20.6',
+    '@swissquote/crafty-preset-jest': '^1.14.0',
+    '@types/jest': '^26.0.22',
+    coveralls: '^3.1.0',
+    eslint: '^7.24.0',
+    'eslint-config-prettier': '^8.2.0',
+    'eslint-config-qiwi': '^1.10.8',
+    jest: '26.6.3',
+    rollup: '^2.45.2',
+    'rollup-plugin-commonjs': '^10.1.0',
+    'rollup-plugin-node-resolve': '^5.2.0',
+    terser: '^5.6.1',
+    'ts-jest': '^26.5.5',
+    typedoc: '^0.20.35',
+    typescript: '^4.2.4',
+  },
+})
+
 describe('yarn-audit-fix', () => {
   beforeAll(() => {
     vi.spyOn(fs, 'writeFileSync').mockImplementation(noop)
     vi.spyOn(fs, 'existsSync').mockImplementation(() => true)
     // @ts-ignore
-    vi.spyOn(fs, 'readFileSync').mockImplementation((name: any, ...rest: any[]) => {
-      const s = String(name)
-      // Only stub the project's own files; delegate everything else (vitest
-      // module sources, node_modules, etc.) to the real fs.
-      if (!s.includes('node_modules')) {
-        const _name = path.basename(s)
-        if (_name === 'yarn.lock') return yarnLockBefore
-        if (_name === 'package.json') return '{"version": "1.0.0"}'
-      }
-      // @ts-ignore
-      return realReadFileSync(name, ...rest)
-    })
+    vi.spyOn(fs, 'readFileSync').mockImplementation(
+      (name: any, ...rest: any[]) => {
+        const s = String(name)
+        // Only stub the project's own files; delegate everything else (vitest
+        // module sources, node_modules, etc.) to the real fs.
+        if (!s.includes('node_modules')) {
+          const _name = path.basename(s)
+          if (_name === 'yarn.lock') return yarnLockBefore
+          if (_name === 'package.json') return projectManifest
+        }
+        // @ts-ignore
+        return realReadFileSync(name, ...rest)
+      },
+    )
     // yaf is spawn-free now; keep a benign spawnSync spy purely so the "never
     // shells out to `yarn install`" assertion below has something to inspect.
     // @ts-ignore
@@ -97,7 +130,8 @@ describe('yarn-audit-fix', () => {
           expect.any(String),
           'yarn-classic',
           expect.any(String),
-          expect.anything(), // the project manifest (for override capture)
+          expect.anything(), // the project manifest (for override capture + anchors)
+          expect.any(Function), // the diagnostic sink (pruned root descriptors)
         )
         expect(lfAudit).toHaveBeenCalledTimes(1)
         expect(lfPatch).toHaveBeenCalledTimes(1)
@@ -200,9 +234,15 @@ describe('yarn-audit-fix', () => {
         return err.mock.calls.map((c) => String(c[0])).join('\n')
       }
       try {
-        expect(await drive({ signal: 'SIGINT' })).toMatch(/interrupted \(SIGINT\)/)
-        expect(await drive({ stderr: Buffer.from('boom from stderr') })).toMatch(/boom from stderr/)
-        expect(await drive({ message: 'just a message' })).toMatch(/just a message/)
+        expect(await drive({ signal: 'SIGINT' })).toMatch(
+          /interrupted \(SIGINT\)/,
+        )
+        expect(
+          await drive({ stderr: Buffer.from('boom from stderr') }),
+        ).toMatch(/boom from stderr/)
+        expect(await drive({ message: 'just a message' })).toMatch(
+          /just a message/,
+        )
         expect(await drive('plain string error')).toMatch(/plain string error/)
       } finally {
         err.mockRestore()
@@ -214,7 +254,9 @@ describe('yarn-audit-fix', () => {
       const handlers: Record<string, any> = {}
       const onSpy = vi
         .spyOn(process, 'on')
-        .mockImplementation((ev: any, fn: any) => ((handlers[ev] = fn), process))
+        .mockImplementation(
+          (ev: any, fn: any) => ((handlers[ev] = fn), process),
+        )
       const err = vi.spyOn(console, 'error').mockImplementation(() => {})
       const prev = process.exitCode
       try {
@@ -227,7 +269,9 @@ describe('yarn-audit-fix', () => {
         } finally {
           vi.useRealTimers() // discards the pending fake timer (process.exit never fires)
         }
-        expect(err).toHaveBeenCalledWith(expect.stringContaining('Aborted (SIGINT)'))
+        expect(err).toHaveBeenCalledWith(
+          expect.stringContaining('Aborted (SIGINT)'),
+        )
         expect(process.exitCode).toBe(130)
       } finally {
         onSpy.mockRestore()
@@ -247,7 +291,7 @@ describe('yarn-audit-fix', () => {
         expect.objectContaining({
           cwd,
           flags: { cwd, bar },
-          manifest: { version: '1.0.0' },
+          manifest: expect.objectContaining({ version: '1.0.0' }),
         }),
       )
     })
