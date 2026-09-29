@@ -1,3 +1,8 @@
+## [11.1.0](https://github.com/lockgraph/yarn-audit-fix/compare/v11.0.5...v11.1.0) (2026-09-29)
+
+### Features
+* feat: remediate to a fixpoint, raise pinning parents, adopt lockgraph 0.9.0 ([9c16da1](https://github.com/lockgraph/yarn-audit-fix/commit/9c16da1c9eb5d2f2ec5cf67cf39f8d11ff877781))
+
 ## [11.0.5](https://github.com/lockgraph/yarn-audit-fix/compare/v11.0.4...v11.0.5) (2026-09-28)
 
 ### Fixes & improvements
